@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::msg::{IncomingNotification, Message, RpcSender};
+use crate::msg::inbound::{Message, Notification, RpcSender};
 
 use std::collections::HashMap;
 
@@ -9,14 +9,12 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use either::Either;
 use futures::FutureExt;
-use serde_json::Value;
 
 pub struct Receiver {
     stdout: BufReader<ChildStdout>,
     listeners: mpsc::Receiver<(u32, RpcSender)>,
-    notifs: broadcast::Sender<IncomingNotification>,
+    notifs: broadcast::Sender<Notification>,
     channels: HashMap<u32, RpcSender>,
 }
 
@@ -41,14 +39,8 @@ impl Receiver {
 
     async fn recv_msg(&mut self) -> Result<Message> {
         let bytes = self.recv_bytes().await.map_err(Error::RecvMsg)?;
-        let decoded: Value = serde_json::from_slice(&bytes).expect("bad json");
-        if decoded.get("id").is_some() {
-            let response = serde_json::from_value(decoded).expect("bad data");
-            Ok(Either::Left(response))
-        } else {
-            let notification = serde_json::from_value(decoded).expect("bad data");
-            Ok(Either::Right(notification))
-        }
+        let decoded = serde_json::from_slice(&bytes).expect("bad json");
+        Ok(decoded)
     }
 
     fn update_listeners(&mut self) {
@@ -61,7 +53,7 @@ impl Receiver {
 
     fn handle_msg(&mut self, msg: Message) {
         match msg {
-            Either::Left(response) => {
+            Message::Response(response) => {
                 self.update_listeners();
                 if let Some(chan) = self.channels.remove(&response.id) {
                     chan.send(response).unwrap_or(());
@@ -69,8 +61,11 @@ impl Receiver {
                     eprintln!("Received response for nonexistent request: {:?}", response);
                 }
             }
-            Either::Right(notif) => {
+            Message::Notification(notif) => {
                 self.notifs.send(notif).unwrap_or(0);
+            }
+            Message::Request(_r) => {
+                // TODO: oh man I am not equipped to handle requests from the server oh dear
             }
         }
     }
@@ -78,7 +73,7 @@ impl Receiver {
     pub fn new(
         stdout: ChildStdout,
         listeners: mpsc::Receiver<(u32, RpcSender)>,
-        notifs: broadcast::Sender<IncomingNotification>,
+        notifs: broadcast::Sender<Notification>,
     ) -> Self {
         Self {
             stdout: BufReader::new(stdout),

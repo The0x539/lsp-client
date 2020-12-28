@@ -2,9 +2,7 @@ mod methods;
 mod receiver;
 
 use crate::error::{Error, ProtocolViolation, Result};
-use crate::msg::{
-    GenericResponse, IncomingNotification, Notification, OutboundMessage, Request, RpcSender,
-};
+use crate::msg::{inbound, outbound};
 use receiver::Receiver;
 
 use std::{ffi::OsStr, process::Stdio};
@@ -23,8 +21,8 @@ pub struct Client {
     proc: Child,
     stdin: ChildStdin,
     req_id: u32,
-    reqs_tx: mpsc::Sender<(u32, RpcSender)>,
-    notifs_rx: broadcast::Receiver<IncomingNotification>,
+    reqs_tx: mpsc::Sender<(u32, inbound::RpcSender)>,
+    notifs_rx: broadcast::Receiver<inbound::Notification>,
 }
 
 impl Client {
@@ -55,7 +53,7 @@ impl Client {
         id
     }
 
-    fn build_msg(content: impl OutboundMessage) -> serde_json::Result<String> {
+    fn build_msg(content: impl outbound::Message) -> serde_json::Result<String> {
         let content_part = serde_json::to_string(&content)?;
         let lines = [
             format!("Content-Length: {}", content_part.len()),
@@ -75,7 +73,7 @@ impl Client {
         R::Result: 'static,
     {
         let id = self.req_id();
-        let content = Request::<R> { id, params };
+        let content = outbound::Request::<R> { id, params };
 
         let (tx, rx) = oneshot::channel();
         self.reqs_tx.send((id, tx)).await.unwrap();
@@ -85,7 +83,7 @@ impl Client {
             .await
             .map_err(Error::SendMsg)?;
 
-        let response: GenericResponse = rx.await.expect("oneshot closed");
+        let response: inbound::GenericResponse = rx.await.expect("oneshot closed");
 
         assert_eq!(response.id, id);
         match (response.result, response.error) {
@@ -107,7 +105,7 @@ impl Client {
     }
 
     pub async fn notify<N: NotificationTrait>(&mut self, params: N::Params) -> Result<()> {
-        let content = Notification::<N> { params };
+        let content = outbound::Notification::<N> { params };
         let msg = Self::build_msg(content).unwrap();
         self.send_msg(msg.as_bytes())
             .await
