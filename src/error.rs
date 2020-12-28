@@ -5,9 +5,9 @@ use thiserror::Error;
 #[derive(Debug, Serialize, Deserialize, Error)]
 #[error("{self:?}")]
 pub struct ResponseError {
-    code: i32,
-    message: String,
-    data: Option<Value>,
+    pub code: i32,
+    pub message: String,
+    pub data: Option<Value>,
 }
 
 #[derive(Debug, Copy, Clone, Error)]
