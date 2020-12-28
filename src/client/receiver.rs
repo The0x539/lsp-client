@@ -63,13 +63,11 @@ impl Receiver {
         match msg {
             Either::Left(response) => {
                 self.update_listeners();
-                self.channels
-                    .remove(&response.id)
-                    .unwrap_or_else(|| {
-                        panic!("Received response for nonexistent request {}", response.id)
-                    })
-                    .send(response)
-                    .unwrap_or(());
+                if let Some(chan) = self.channels.remove(&response.id) {
+                    chan.send(response).unwrap_or(());
+                } else {
+                    eprintln!("Received response for nonexistent request: {:?}", response);
+                }
             }
             Either::Right(notif) => {
                 self.notifs.send(notif).unwrap_or(0);

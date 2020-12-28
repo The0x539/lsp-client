@@ -69,7 +69,11 @@ impl Client {
         self.stdin.write_all(msg).await
     }
 
-    pub async fn request<R: RequestTrait>(&mut self, params: R::Params) -> Result<R::Result> {
+    pub async fn request<R: RequestTrait>(&mut self, params: R::Params) -> Result<R::Result>
+    where
+        R: RequestTrait,
+        R::Result: 'static,
+    {
         let id = self.req_id();
         let content = Request::<R> { id, params };
 
@@ -88,7 +92,17 @@ impl Client {
             (Some(r), None) => Ok(serde_json::from_value(r).expect("bad data")),
             (None, Some(e)) => Err(Error::Lsp(e)),
             (Some(_), Some(_)) => Err(ProtocolViolation::BothResultAndResponse.into()),
-            (None, None) => Err(ProtocolViolation::NeitherResultNorResponse.into()),
+            (None, None) => {
+                // Hang on.
+                // If R::Result gets serialized as a unit,
+                // then we could've deserialized it as None instead of Some(()).
+                // Don't be so hasty to return an error.
+                if std::any::TypeId::of::<R::Result>() == std::any::TypeId::of::<()>() {
+                    Ok(serde_json::from_value(().into()).unwrap())
+                } else {
+                    Err(ProtocolViolation::NeitherResultNorResponse.into())
+                }
+            }
         }
     }
 

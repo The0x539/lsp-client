@@ -1,8 +1,9 @@
 use crate::error::Result;
 
 use lsp_types::{
-    notification::Initialized, request::Initialize, ClientCapabilities, InitializeParams,
-    InitializeResult, InitializedParams, WorkspaceFolder,
+    notification::{Exit, Initialized},
+    request::{Initialize, Shutdown},
+    ClientCapabilities, InitializeParams, InitializeResult, InitializedParams, WorkspaceFolder,
 };
 
 use super::Client;
@@ -35,5 +36,13 @@ impl Client {
         let res = self.request::<Initialize>(params).await?;
         self.notify::<Initialized>(InitializedParams {}).await?;
         Ok(res)
+    }
+
+    pub async fn shutdown(&mut self) -> Result<()> {
+        self.request::<Shutdown>(()).await
+    }
+
+    pub async fn exit(&mut self) -> Result<()> {
+        self.notify::<Exit>(()).await
     }
 }

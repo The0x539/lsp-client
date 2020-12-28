@@ -10,7 +10,9 @@ async fn main() -> anyhow::Result<()> {
         .initialize(cwd.to_str().unwrap(), caps())
         .await
         .unwrap();
-    let _x = format!("{}", serde_json::to_string_pretty(&res)?);
-    println!("got here");
+
+    println!("{}", serde_json::to_string_pretty(&res)?);
+    client.shutdown().await?;
+    client.exit().await?;
     Ok(())
 }
