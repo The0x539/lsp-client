@@ -51,8 +51,19 @@ impl<N: NotificationTrait> Serialize for Notification<N> {
     }
 }
 
-// TODO: seal this trait
-pub trait Message: Serialize {}
+mod private {
+    use super::{Notification, Request, Response};
+    use super::{NotificationTrait, RequestTrait};
+
+    pub trait Sealed {}
+    impl<R: RequestTrait> Sealed for Request<R> {}
+    impl<R: RequestTrait> Sealed for Response<R> {}
+    impl<N: NotificationTrait> Sealed for Notification<N> {}
+    impl<T: Sealed> Sealed for &T {}
+}
+use private::Sealed;
+
+pub trait Message: Serialize + Sealed {}
 impl<R: RequestTrait> Message for Request<R> {}
 impl<R: RequestTrait> Message for Response<R> {}
 impl<N: NotificationTrait> Message for Notification<N> {}
