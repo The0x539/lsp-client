@@ -12,9 +12,5 @@ async fn main() -> anyhow::Result<()> {
         .unwrap();
     let _x = format!("{}", serde_json::to_string_pretty(&res)?);
     println!("got here");
-
-    loop {
-        let msg = client.recv_msg().await?;
-        println!("{}", std::str::from_utf8(&msg).unwrap());
-    }
+    Ok(())
 }

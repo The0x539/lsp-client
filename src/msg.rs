@@ -1,7 +1,10 @@
 use serde::{ser::SerializeStruct, Deserialize, Serialize, Serializer};
 
+use either::Either;
 use lsp_types::notification::Notification as NotificationTrait;
 use lsp_types::request::Request as RequestTrait;
+use serde_json::Value;
+use tokio::sync::oneshot;
 
 pub struct Request<R: RequestTrait> {
     pub id: u32,
@@ -39,9 +42,19 @@ impl<R: RequestTrait> OutboundMessage for Request<R> {}
 impl<N: NotificationTrait> OutboundMessage for Notification<N> {}
 impl<T: OutboundMessage> OutboundMessage for &T {}
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Response<T> {
     pub id: u32,
     pub result: Option<T>,
     pub error: Option<crate::error::ResponseError>,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct IncomingNotification {
+    pub method: String,
+    pub params: Value,
+}
+
+pub type GenericResponse = Response<Value>;
+pub type RpcSender = oneshot::Sender<GenericResponse>;
+pub type Message = Either<GenericResponse, IncomingNotification>;

@@ -1,11 +1,17 @@
+mod receiver;
+
 use crate::error::{Error, ProtocolViolation, Result};
-use crate::msg::{Notification, OutboundMessage, Request, Response};
+use crate::msg::{
+    GenericResponse, IncomingNotification, Notification, OutboundMessage, Request, RpcSender,
+};
+use receiver::Receiver;
 
 use std::{ffi::OsStr, process::Stdio};
 
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    process::{Child, ChildStdin, ChildStdout, Command},
+    io::AsyncWriteExt,
+    process::{Child, ChildStdin, Command},
+    sync::{broadcast, mpsc, oneshot},
 };
 
 use lsp_types::notification::Notification as NotificationTrait;
@@ -19,8 +25,9 @@ use lsp_types::{
 pub struct Client {
     proc: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
     req_id: u32,
+    reqs_tx: mpsc::Sender<(u32, RpcSender)>,
+    notifs_rx: broadcast::Receiver<IncomingNotification>,
 }
 
 impl Client {
@@ -30,11 +37,18 @@ impl Client {
             .stdout(Stdio::piped())
             .spawn()?;
 
+        let stdout = proc.stdout.take().unwrap();
+        let (reqs_tx, reqs_rx) = mpsc::channel(100);
+        let (notifs_tx, notifs_rx) = broadcast::channel(1000);
+        let receiver = Receiver::new(stdout, reqs_rx, notifs_tx);
+        tokio::spawn(receiver.run());
+
         Ok(Self {
             stdin: proc.stdin.take().unwrap(),
-            stdout: BufReader::new(proc.stdout.take().unwrap()),
             proc,
             req_id: 1,
+            reqs_tx,
+            notifs_rx,
         })
     }
 
@@ -58,39 +72,23 @@ impl Client {
         self.stdin.write_all(msg).await
     }
 
-    pub async fn recv_msg(&mut self) -> std::io::Result<Vec<u8>> {
-        let mut content_len = None;
-        let mut line = String::new();
-        loop {
-            self.stdout.read_line(&mut line).await?;
-            if line == "\r\n" {
-                break;
-            } else if let Some(len) = line.strip_prefix("Content-Length: ") {
-                let n = len.trim_end().parse::<usize>().expect("bad num");
-                content_len = Some(n);
-            }
-            line.clear();
-        }
-        let mut buf = vec![0; content_len.expect("no len")];
-        self.stdout.read_exact(&mut buf).await?;
-        Ok(buf)
-    }
-
     pub async fn request<R: RequestTrait>(&mut self, params: R::Params) -> Result<R::Result> {
         let id = self.req_id();
         let content = Request::<R> { id, params };
+
+        let (tx, rx) = oneshot::channel();
+        self.reqs_tx.send((id, tx)).await.unwrap();
 
         let msg = Self::build_msg(content).unwrap();
         self.send_msg(msg.as_bytes())
             .await
             .map_err(Error::SendMsg)?;
 
-        let r_msg = self.recv_msg().await.map_err(Error::RecvMsg)?;
-        let response: Response<R::Result> = serde_json::from_slice(&r_msg).expect("bad data");
+        let response: GenericResponse = rx.await.expect("oneshot closed");
 
         assert_eq!(response.id, id);
         match (response.result, response.error) {
-            (Some(r), None) => Ok(r),
+            (Some(r), None) => Ok(serde_json::from_value(r).expect("bad data")),
             (None, Some(e)) => Err(Error::Lsp(e)),
             (Some(_), Some(_)) => Err(ProtocolViolation::BothResultAndResponse.into()),
             (None, None) => Err(ProtocolViolation::NeitherResultNorResponse.into()),
