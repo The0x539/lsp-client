@@ -1,3 +1,4 @@
+mod methods;
 mod receiver;
 
 use crate::error::{Error, ProtocolViolation, Result};
@@ -16,10 +17,6 @@ use tokio::{
 
 use lsp_types::notification::Notification as NotificationTrait;
 use lsp_types::request::Request as RequestTrait;
-use lsp_types::{
-    notification::Initialized, request::Initialize, ClientCapabilities, InitializeParams,
-    InitializeResult, InitializedParams, WorkspaceFolder,
-};
 
 #[derive(Debug)]
 pub struct Client {
@@ -102,34 +99,5 @@ impl Client {
             .await
             .map_err(Error::SendMsg)?;
         Ok(())
-    }
-
-    pub async fn initialize(
-        &mut self,
-        cwd: &str,
-        capabilities: ClientCapabilities,
-    ) -> Result<InitializeResult> {
-        let uri = lsp_types::Url::from_directory_path(cwd).unwrap();
-        let folder = WorkspaceFolder {
-            uri: uri.clone(),
-            name: cwd.into(),
-        };
-
-        #[allow(deprecated)]
-        let params = InitializeParams {
-            process_id: Some(std::process::id()),
-            root_path: Some(cwd.into()),
-            root_uri: Some(uri),
-            initialization_options: None,
-            capabilities,
-            trace: None,
-            workspace_folders: Some(vec![folder]),
-            client_info: None,
-            locale: None,
-        };
-
-        let res = self.request::<Initialize>(params).await?;
-        self.notify::<Initialized>(InitializedParams {}).await?;
-        Ok(res)
     }
 }
